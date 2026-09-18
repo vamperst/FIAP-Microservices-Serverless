@@ -353,7 +353,7 @@ sls remove
 <summary><b>💡 Clique para entender: o que o sls remove faz por baixo dos panos</b></summary>
 <blockquote>
 
-O comando deleta a *stack* do CloudFormation criada no passo 6, removendo a função Lambda, o *role* de execução e o Event Source Mapping associado. É **idempotente**: rodar `sls remove` numa stack que já não existe apenas retorna sem erro relevante.
+O comando deleta a *stack* do CloudFormation criada no passo 6, removendo a função Lambda e o Event Source Mapping associado. A `LabRole` **não** é removida: ela não pertence à stack e já existia na conta antes do deploy. É **idempotente**: rodar `sls remove` numa stack que já não existe apenas retorna sem erro relevante.
 
 📚 Documentação oficial: [Serverless Framework — remove](https://www.serverless.com/framework/docs/providers/aws/cli-reference/remove) — detalha o processo de remoção da stack.
 

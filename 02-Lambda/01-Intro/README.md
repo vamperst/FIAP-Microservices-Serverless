@@ -40,7 +40,7 @@ Uma função Lambda publicada na AWS, testada remotamente e localmente, e removi
 
 O **AWS Lambda** executa código sob demanda sem que você precise provisionar ou gerenciar servidor nenhum — você entrega a função, a AWS cuida do resto (escalonamento, disponibilidade, patch do runtime). O ganho para quem desenvolve é não pensar em infraestrutura; o custo é que o deploy e o empacotamento do código passam a ser um passo a mais no fluxo de trabalho.
 
-É exatamente esse passo a mais que o **Serverless Framework** (comando `sls`) resolve neste laboratório: ele lê um arquivo `serverless.yml` declarando a função, empacota o código, cria (ou atualiza) uma stack do CloudFormation com tudo que a função precisa (a própria função, a role de execução, o log group) e permite invocar e remover essa stack com um comando cada. Você vai ver essa mesma sequência — criar, configurar, `deploy`, `invoke`, `remove` — se repetir nos próximos laboratórios do módulo.
+É exatamente esse passo a mais que o **Serverless Framework** (comando `sls`) resolve neste laboratório: ele lê um arquivo `serverless.yml` declarando a função, empacota o código, cria (ou atualiza) uma stack do CloudFormation com tudo que a função precisa (a própria função, o log group e, quando você não indica uma role existente, também a role de execução) e permite invocar e remover essa stack com um comando cada. No Learner Lab você vai sempre indicar a `LabRole`, porque a conta não permite criar roles novas. Você vai ver essa mesma sequência — criar, configurar, `deploy`, `invoke`, `remove` — se repetir nos próximos laboratórios do módulo.
 
 ## Parte 1 - Criando e implantando a função
 
@@ -309,13 +309,13 @@ sls remove
 
 ![img/slsremove.png](img/slsremove.png)
 
-Este é o passo de limpeza: sem ele, a função e os recursos associados (role, log group) continuam na conta depois que o laboratório termina. O comando é seguro de rodar mais de uma vez — se a stack já tiver sido removida, ele apenas confirma que não há nada para remover.
+Este é o passo de limpeza: sem ele, a função e os recursos associados (log group) continuam na conta depois que o laboratório termina. O comando é seguro de rodar mais de uma vez — se a stack já tiver sido removida, ele apenas confirma que não há nada para remover.
 
 <details>
 <summary>💡 Clique para entender: o que o <code>sls remove</code> faz por baixo dos panos</summary>
 <blockquote>
 
-Este comando chama **`DeleteStack`** na stack do CloudFormation criada no passo 5, o que remove em cascata a função Lambda, a IAM role de execução e o log group no CloudWatch. O bucket S3 de deployment (compartilhado entre laboratórios da mesma região/conta) não é removido por este comando.
+Este comando chama **`DeleteStack`** na stack do CloudFormation criada no passo 5, o que remove em cascata a função Lambda e o log group no CloudWatch. A `LabRole` **não** é removida: ela não pertence à stack, já existia na conta antes do deploy e é reusada pelos outros laboratórios. O bucket S3 de deployment (compartilhado entre laboratórios da mesma região/conta) também não é removido por este comando.
 
 📚 Documentação oficial: [Remove - Serverless CLI reference](https://www.serverless.com/framework/docs/providers/aws/cli-reference/remove) — explica a ordem de remoção dos recursos e como o Serverless Framework decide o que pertence à stack.
 

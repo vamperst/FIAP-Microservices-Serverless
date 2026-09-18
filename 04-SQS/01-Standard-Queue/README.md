@@ -11,13 +11,13 @@ Todos os comandos de terminal deste laboratório rodam no terminal do **Codespac
 > - [ ] Serverless Framework instalado (já vem no devcontainer) → valide com `sls --version`
 > - [ ] `jq` disponível para extrair valores de JSON → valide com `jq --version`
 
-Neste laboratório você vai criar sua primeira fila **SQS Standard** pelo console AWS, popular ela com 3.000 mensagens usando `boto3`, e depois consumir essa fila automaticamente com uma função **Lambda** disparada por **Event Source Mapping**. É o fluxo produtor → fila → consumidor mais simples possível em arquitetura serverless, e serve de base para os dois próximos laboratórios (DLQ e Lambda avançado).
+Neste laboratório você vai criar sua primeira fila **SQS Standard** pelo console AWS, popular ela com 3.000 mensagens usando `boto3`, e depois consumir essa fila com uma função **Lambda** que você invoca manualmente e que lê a fila por conta própria com `boto3`. É o fluxo produtor → fila → consumidor mais simples possível em arquitetura serverless, e serve de base para os dois próximos laboratórios (DLQ e Lambda avançado) — no 04.3 você vai trocar essa leitura manual por um gatilho automático.
 
 ## Principais pontos de aprendizagem
 
 - Criar e configurar uma fila SQS Standard pelo console AWS
 - Enviar mensagens em lote (`SendMessageBatch`) via `boto3`
-- Conectar uma fila SQS como gatilho (*event source*) de uma função Lambda
+- Ler e apagar mensagens de uma fila (`ReceiveMessage` / `DeleteMessage`) dentro de uma Lambda
 - Fazer deploy e remoção de infraestrutura com o Serverless Framework
 
 ## O que você terá ao final
@@ -33,7 +33,7 @@ Duas filas SQS (`demoqueue` e `demoqueue_dest`) e uma função Lambda publicada,
 |---|---|---|---|
 | [Parte 1 - Criando a fila SQS](#parte-1---criando-a-fila-sqs) | Criar a fila `demoqueue` pelo console | ~5 min | [1](#passo-1) · [2](#passo-2) |
 | [Parte 2 - Enviando dados para a fila](#parte-2---enviando-dados-para-a-fila) | Popular a fila com 3.000 mensagens via Python | ~8 min | [3](#passo-3) · [4](#passo-4) · [5](#passo-5) · [6](#passo-6) · [7](#passo-7) |
-| [Parte 3 - Consumindo com Lambda](#parte-3---consumindo-com-lambda) | Lambda com SQS como gatilho, deploy e limpeza | ~15 min | [8](#passo-8) · [9](#passo-9) · [10](#passo-10) · [11](#passo-11) · [12](#passo-12) · [13](#passo-13) · [14](#passo-14) · [15](#passo-15) · [16](#passo-16) · [17](#passo-17) · [18](#passo-18) |
+| [Parte 3 - Consumindo com Lambda](#parte-3---consumindo-com-lambda) | Lambda que lê a fila, deploy e limpeza | ~15 min | [8](#passo-8) · [9](#passo-9) · [10](#passo-10) · [11](#passo-11) · [12](#passo-12) · [13](#passo-13) · [14](#passo-14) · [15](#passo-15) · [16](#passo-16) · [17](#passo-17) · [18](#passo-18) |
 
 <details>
 <summary><b>💡 Clique para entender: o que é uma fila SQS Standard</b></summary>
@@ -238,7 +238,7 @@ O script monta uma lista de 3.000 mensagens e as divide em lotes de 10 (o máxim
 
 ### Resultado esperado desta parte
 
-Ao final desta parte, uma função Lambda estará publicada, conectada à `demoqueue` como gatilho, consumindo mensagens e reenviando-as para a fila `demoqueue_dest` — e depois removida, deixando a conta limpa.
+Ao final desta parte, uma função Lambda estará publicada, lendo mensagens da `demoqueue` e reenviando-as para a fila `demoqueue_dest` — e depois removida, deixando a conta limpa.
 
 <a id="passo-8"></a>
 
@@ -328,12 +328,16 @@ O `${AWS::AccountId}` é resolvido pelo próprio CloudFormation no momento do de
 </dl>
 
 <details>
-<summary><b>💡 Clique para entender: o event source mapping da SQS com a Lambda</b></summary>
+<summary><b>💡 Clique para entender: por que aqui a Lambda recebe as URLs das filas como variável de ambiente</b></summary>
 <blockquote>
 
-A seção de `functions` do `serverless.yml` declara a `demoqueue` como gatilho (*event source*) da função, usando um parâmetro `batchSize` que define quantas mensagens a Lambda recebe por invocação (até 10.000 para Standard Queue, dependendo do tipo de processamento). Por baixo dos panos, o deploy cria um **Event Source Mapping** entre a fila SQS e a função Lambda, que faz *polling* automático da fila e invoca a função sempre que há mensagens disponíveis.
+Neste laboratório a função **não** tem gatilho: ela não é acionada pela fila, e sim invocada por você no passo 15. Por isso o `serverless.yml` não declara nenhum `events` — só passa as duas URLs em `provider.environment` (`sqs_url` e `sqs_url_dest`), e é o próprio `handler.py` que chama `ReceiveMessage` na fila de origem e `SendMessage` na de destino usando `boto3`.
 
-📚 Documentação oficial: [Using Lambda with Amazon SQS](https://docs.aws.amazon.com/lambda/latest/dg/with-sqs.html) — explica o funcionamento do event source mapping e o papel do `batchSize`.
+É também por isso que o `timeout` está em **300 segundos**: o handler faz até 100 rodadas de leitura dentro da mesma invocação, e precisa de tempo de execução para isso. Como não existe gatilho de SQS, o `VisibilityTimeout` de 30 segundos da fila (o default que você manteve no passo 1) não interfere no deploy.
+
+No laboratório 04.3 você vai fazer o contrário: declarar a fila como gatilho de verdade e deixar a AWS invocar a função — e lá o `serverless.yml` vai precisar do **ARN** da fila, não da URL.
+
+📚 Documentação oficial: [Serverless Framework — environment variables](https://www.serverless.com/framework/docs/providers/aws/guide/variables) — como o `provider.environment` chega ao código da função.
 
 </blockquote>
 </details>
@@ -359,6 +363,19 @@ code handler.py
 </dd>
 </dl>
 
+<details>
+<summary><b>💡 Clique para entender: de onde vem o limite de 1.000 mensagens por execução</b></summary>
+<blockquote>
+
+O handler tem um laço `for i in range(100)` e, em cada rodada, chama `getMessage(10)` — ou seja, `ReceiveMessage` pedindo no máximo 10 mensagens (o limite da API por chamada). São, no pior caso, 100 × 10 = **1.000 mensagens por invocação**. Se a fila esvaziar antes, o `break` encerra o laço.
+
+Cada mensagem lida é reenviada para a `demoqueue_dest` e só então apagada da origem com `deleteMessage(ReceiptHandle)`. O `ReceiptHandle` é um identificador temporário devolvido pelo `ReceiveMessage` — é ele, e não o `MessageId`, que a SQS exige para apagar uma mensagem.
+
+📚 Documentação oficial: [ReceiveMessage - Amazon SQS API Reference](https://docs.aws.amazon.com/AWSSimpleQueueService/latest/APIReference/API_ReceiveMessage.html) — documenta o limite de 10 mensagens por chamada e o papel do `ReceiptHandle`.
+
+</blockquote>
+</details>
+
 ---
 
 <a id="passo-13"></a>
@@ -380,7 +397,7 @@ sls deploy
 <summary><b>💡 Clique para entender: o que o sls deploy faz por baixo dos panos</b></summary>
 <blockquote>
 
-O `sls deploy` empacota o código, gera um template do CloudFormation a partir do `serverless.yml` e sobe (ou atualiza) uma *stack* na conta AWS, criando a função Lambda e o Event Source Mapping descrito no passo 11. O *role* de execução não é criado: a função reusa a `LabRole` que você indicou no `provider`, e é dela que vem a permissão para ler da SQS. O comando é **idempotente**: rodar `sls deploy` de novo sobre uma stack já publicada apenas aplica o diff, sem duplicar recursos — pode rodar quantas vezes precisar.
+O `sls deploy` empacota o código, gera um template do CloudFormation a partir do `serverless.yml` e sobe (ou atualiza) uma *stack* na conta AWS, criando a função Lambda. O *role* de execução não é criado: a função reusa a `LabRole` que você indicou no `provider`, e é dela que vem a permissão para ler da SQS. O comando é **idempotente**: rodar `sls deploy` de novo sobre uma stack já publicada apenas aplica o diff, sem duplicar recursos — pode rodar quantas vezes precisar.
 
 📚 Documentação oficial: [Serverless Framework — deploy](https://www.serverless.com/framework/docs/providers/aws/cli-reference/deploy) — detalha o ciclo de empacotamento e atualização de stack via CloudFormation.
 
@@ -420,7 +437,7 @@ a causa é a linha `iam.role` faltando no `provider` do `serverless.yml`. O Lear
 python3 put.py
 ```
 
-Lembre-se: cada execução do Lambda pode consumir até 1.000 posições da fila SQS, conforme o `batchSize` configurado no passo 11.
+Lembre-se: cada execução do Lambda consome até 1.000 posições da fila SQS, por causa do laço do `handler.py` criado no passo 12.
 
 </dd>
 </dl>
@@ -463,7 +480,7 @@ O `sls invoke` chama a API `Invoke` do Lambda de forma síncrona (`RequestRespon
 <dt></dt>
 <dd>
 
-Enquanto o comando anterior espera, acompanhe no [painel do SQS](https://console.aws.amazon.com/sqs/v2/home?region=us-east-1#/queues) as mensagens saindo de `demoqueue` e chegando em `demoqueue_dest`. Atualize manualmente pelo ícone no canto superior direito do painel — cada execução do Lambda move até 1.000 mensagens, por definição do `batchSize` no código.
+Enquanto o comando anterior espera, acompanhe no [painel do SQS](https://console.aws.amazon.com/sqs/v2/home?region=us-east-1#/queues) as mensagens saindo de `demoqueue` e chegando em `demoqueue_dest`. Atualize manualmente pelo ícone no canto superior direito do painel — cada execução do Lambda move até 1.000 mensagens, por definição do laço no código.
 
 ![alt](img/lambda-02-1.png)
 
@@ -480,7 +497,7 @@ Enquanto o comando anterior espera, acompanhe no [painel do SQS](https://console
 <dt></dt>
 <dd>
 
-Se esperar mais algumas execuções automáticas do Event Source Mapping, você vai ver a `demoqueue` zerar as mensagens disponíveis, todas movidas para `demoqueue_dest`.
+Repita o [passo 15](#passo-15) algumas vezes — com 3.000 mensagens na fila e até 1.000 por execução, são cerca de três invocações até a `demoqueue` zerar as mensagens disponíveis, todas movidas para `demoqueue_dest`.
 
 </dd>
 </dl>
@@ -512,7 +529,7 @@ sls remove
 <summary><b>💡 Clique para entender: o que o sls remove faz por baixo dos panos</b></summary>
 <blockquote>
 
-O comando deleta a *stack* do CloudFormation criada no passo 13, removendo a função Lambda, o *role* de execução e o Event Source Mapping associado. É **idempotente**: rodar `sls remove` numa stack que já não existe apenas retorna sem erro relevante, então não há problema em rodar de novo caso tenha dúvida se já removeu.
+O comando deleta a *stack* do CloudFormation criada no passo 13, removendo a função Lambda e os recursos que a stack criou. A `LabRole` **não** é removida: ela não pertence à stack, já existia na conta antes do deploy e continua lá para os próximos laboratórios. É **idempotente**: rodar `sls remove` numa stack que já não existe apenas retorna sem erro relevante, então não há problema em rodar de novo caso tenha dúvida se já removeu.
 
 📚 Documentação oficial: [Serverless Framework — remove](https://www.serverless.com/framework/docs/providers/aws/cli-reference/remove) — detalha o processo de remoção da stack.
 
@@ -521,7 +538,7 @@ O comando deleta a *stack* do CloudFormation criada no passo 13, removendo a fun
 
 ## Conclusão
 
-Você criou uma fila SQS Standard, populou ela via `boto3` em lotes, e conectou uma função Lambda como consumidora automática via Event Source Mapping — o padrão produtor/fila/consumidor mais comum em arquiteturas serverless. As filas `demoqueue` e `demoqueue_dest` continuam existindo (só a stack Lambda foi removida); você vai reaproveitá-las no próximo laboratório.
+Você criou uma fila SQS Standard, populou ela via `boto3` em lotes, e publicou uma função Lambda que lê a fila de origem e reenvia as mensagens para a fila de destino — o padrão produtor/fila/consumidor mais comum em arquiteturas serverless. Aqui o consumo foi disparado por você, na mão; no laboratório 04.3 a própria fila vai passar a invocar a função. As filas `demoqueue` e `demoqueue_dest` continuam existindo (só a stack Lambda foi removida); você vai reaproveitá-las no próximo laboratório.
 
 ## Próximo passo
 
@@ -534,8 +551,8 @@ Siga para [04.2 - DLQ](../02-DLQ/README.md): você vai forçar falhas de entrega
 |---|---|
 | SQS Standard Queue | Fila com entrega *at-least-once* e sem garantia de ordem, throughput praticamente ilimitado |
 | VisibilityTimeout | Tempo em que uma mensagem lida fica invisível para outros consumidores |
-| Event Source Mapping | Configuração que faz o Lambda fazer *polling* automático de uma fonte de eventos, como SQS |
-| batchSize | Quantidade de mensagens entregues por invocação do Lambda |
+| ReceiptHandle | Identificador temporário devolvido pelo `ReceiveMessage`, exigido para apagar a mensagem |
+| SendMessageBatch | Operação que envia até 10 mensagens em uma única chamada à SQS |
 | boto3 | SDK oficial da AWS para Python |
 | venv | Ambiente virtual Python, isola dependências do projeto do restante do sistema |
 | Serverless Framework | Ferramenta de infraestrutura como código para funções serverless (Lambda, API Gateway, etc.) |
