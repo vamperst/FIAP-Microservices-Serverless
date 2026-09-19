@@ -254,6 +254,34 @@ Substitua o conteúdo do arquivo pelo da imagem abaixo — é aqui que a Layer �
 </dd>
 </dl>
 
+<details>
+<summary><b>💡 Clique para entender: o <code>package.exclude</code> e o aviso de deprecação que vai aparecer</b></summary>
+<blockquote>
+
+O bloco `package.exclude` com `- layer/**` evita que o conteúdo da pasta `layer/` entre também no pacote da função: as dependências já vão para a AWS dentro da Layer, e incluí-las de novo no `.zip` da função dobraria o tamanho do deploy sem nenhum ganho.
+
+Essa é a sintaxe antiga. A partir do Serverless Framework 2, ela foi substituída por `package.patterns`, onde a exclusão é escrita com `!` na frente do padrão:
+
+```yaml
+package:
+  patterns:
+    - '!layer/**'
+```
+
+As duas formas funcionam na versão 3 usada neste laboratório, mas o `exclude` imprime um aviso no terminal durante o `sls deploy`:
+
+```
+Support for "package.include" and "package.exclude" will be removed in the next
+major release. Please use "package.patterns" instead
+```
+
+É só um aviso de deprecação — **o deploy conclui normalmente** e não há nada a corrigir para o laboratório funcionar. Se quiser deixar o arquivo na sintaxe atual, troque o bloco pelo `patterns` acima; o resultado é o mesmo.
+
+📚 Documentação oficial: [Serverless Framework — package patterns](https://www.serverless.com/framework/docs/providers/aws/guide/packaging) — explica a sintaxe de `patterns` e a ordem em que os padrões são aplicados.
+
+</blockquote>
+</details>
+
 ### Checkpoint
 
 - [ ] `layer/` contém o `boto3` instalado (confirme com `ls layer`).
