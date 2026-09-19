@@ -253,16 +253,48 @@ Ao final desta parte, você terá rodado um consumidor que recebe mensagens sem 
 <dt></dt>
 <dd>
 
-Faça as alterações no arquivo `consumer.py` conforme a imagem abaixo, sem esquecer de colocar a URL da `demoqueue`. Para abrir:
+O `consumer.py` já está no repositório e só precisa de uma alteração: trocar o `<url da sua fila>` pela URL da `demoqueue`. Para abrir:
 
 ```shell
 code consumer.py
 ```
 
+O código do arquivo, com os comentários omitidos, é este:
+
+```python
+from sqsHandler import SqsHandler
+
+sqs = SqsHandler('<url da sua fila>')
+
+while(True):
+    response = sqs.getMessage(10, 20)
+
+    if('Messages' not in response):
+        break
+
+    for msg in response['Messages']:
+        print(msg['MessageId'])
+```
+
+A imagem abaixo mostra a mesma tela no vídeo da aula. Use o bloco de código acima como referência, não a imagem: a URL dela tem o número da conta da gravação (a sua é diferente) e o `if` dela usa `len(response['Messages'])`, que quebra com `KeyError` quando a fila fica sem mensagens visíveis.
+
 ![img/dlq-03.png](img/dlq-03.png)
 
 </dd>
 </dl>
+
+<details>
+<summary><b>💡 Clique para entender: por que o loop precisa de long polling e do teste com <code>not in</code></b></summary>
+<blockquote>
+
+O segundo argumento de `getMessage(10, 20)` é o `WaitTimeSeconds` do `ReceiveMessage` — o **long polling**. Sem ele (`WaitTimeSeconds=0`), a chamada volta imediatamente e, como as mensagens ficam invisíveis por 1 segundo depois de cada leitura, é comum a resposta vir vazia com a fila ainda cheia: o loop encerraria antes de as redelivery levarem as mensagens para a DLQ, e o laboratório não demonstraria nada. Com 20 segundos de espera, a chamada só volta quando há mensagem disponível (ou ao fim do tempo), o que mantém o consumidor rodando até a fila realmente esvaziar.
+
+Já o teste `if('Messages' not in response)` existe porque a SQS **omite a chave `Messages`** da resposta quando não há nada visível na fila — ela não devolve uma lista vazia. Por isso `len(response['Messages']) == 0` levanta `KeyError` em vez de encerrar o loop.
+
+📚 Documentação oficial: [Amazon SQS short and long polling](https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/sqs-short-and-long-polling.html) — compara os dois modos e explica quando a resposta volta vazia.
+
+</blockquote>
+</details>
 
 ---
 
